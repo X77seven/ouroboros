@@ -24,7 +24,7 @@ import { openConfirmDialog } from './confirm_dialog.js';
 import { confirmAndSendRestart } from './chat_activity.js';
 import { PROVIDER_TEST_INPUTS, SECRET_KEYS, bindSecretInputs, bindSettingsTabs, renderSettingsPage } from './settings_ui.js';
 import { showToast } from './toast.js';
-import { escapeHtmlAttr as escapeHtml, formatDualVersion } from './utils.js';
+import { escapeHtmlAttr as escapeHtml, formatDualVersion, safetySkipCounterLabel } from './utils.js';
 import { apiClient, apiFetch, cleanExtensionRoute, extensionRoutePath } from './api_client.js';
 import { claudexorStatus } from './claudexor_status_store.js';
 import { createModelRolesEditor } from './model_roles.js';
@@ -1097,23 +1097,16 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
     }
 
     async function refreshSafetySkipCounter() {
-        // 24h count of durable safety_mode_skip audit events, so the owner sees how much
-        // the reduced coverage actually waved through.
+        // Count of durable safety_mode_skip audit events, so the owner sees how much
+        // the reduced coverage actually waved through. The copy states the window the
+        // recent events tail really covered: the 2000-row tail often reaches back far
+        // less than a day, and claiming "24h" there undercounts while overclaiming
+        // coverage (#1800).
         const el = byId('s-safety-skip-counter');
         if (!el) return;
         try {
             const data = await apiClient.logsTail('events', 2000);
-            const cutoff = Date.now() - 24 * 3600 * 1000;
-            const n = (data?.entries || []).filter((e) => {
-                if (String(e?.type || '') !== 'safety_mode_skip') return false;
-                const t = Date.parse(String(e?.ts || ''));
-                return Number.isFinite(t) && t >= cutoff;
-            }).length;
-            // Honest window note: the count scans the recent events tail (2000), so a
-            // very busy day can undercount — say "recent", never overclaim exactness.
-            el.textContent = n > 0
-                ? `${n} safety check(s) waved through in the last 24h (audited; recent events window).`
-                : 'No safety checks waved through in the last 24h (recent events window).';
+            el.textContent = safetySkipCounterLabel(data?.entries);
         } catch {
             el.textContent = '';
         }

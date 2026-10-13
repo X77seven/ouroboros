@@ -358,6 +358,50 @@ export function allowanceLabel(spent, daily, unknownUnmetered = 0, integrityDegr
     return `${floor}${formatUsd2(spent)} / ${formatUsd2(daily)}${degraded}`;
 }
 
+export function formatRecentWindow(ms) {
+    // A human span for "how far back did we actually look": 77 min -> "1h 17m",
+    // 40 min -> "40 min". Never rounds a partial minute up to a whole one, so a
+    // narrow window cannot read as wider than it was.
+    const total = Math.round(Number(ms) / 60000);
+    if (!Number.isFinite(total) || total <= 0) return '';
+    const hours = Math.floor(total / 60);
+    const minutes = total % 60;
+    if (hours === 0) return `${minutes} min`;
+    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+export function safetySkipCounterLabel(entries, nowMs = Date.now()) {
+    // Settings counts durable `safety_mode_skip` audit events inside 24h, but it
+    // can only read the recent events tail (2000 rows). On a busy install that
+    // tail covers far less than a day, and the old copy still claimed "in the
+    // last 24h" — undercounting while overclaiming coverage (#1800).
+    // Label the count by the window the tail actually covered, and say plainly
+    // when a full day was not covered.
+    const rows = Array.isArray(entries) ? entries : [];
+    if (!rows.length) return 'No recent events to audit, so no safety-check count is available.';
+    const cutoff = Number(nowMs) - 24 * 3600 * 1000;
+    let oldest = null;
+    let skipped = 0;
+    for (const entry of rows) {
+        const t = Date.parse(String(entry?.ts || ''));
+        if (!Number.isFinite(t)) continue;
+        if (oldest === null || t < oldest) oldest = t;
+        if (String(entry?.type || '') === 'safety_mode_skip' && t >= cutoff) skipped += 1;
+    }
+    if (oldest === null) {
+        return 'No recent event carries a readable timestamp, so no safety-check count is available.';
+    }
+    if (oldest <= cutoff) {
+        return skipped > 0
+            ? `${skipped} safety check(s) waved through in the last 24h (audited; full window covered).`
+            : 'No safety checks waved through in the last 24h (audited; full window covered).';
+    }
+    const span = formatRecentWindow(Number(nowMs) - oldest);
+    return skipped > 0
+        ? `${skipped} safety check(s) waved through in the last ${span} (audited; recent events window — a full 24h was not covered, so the 24h count may be higher).`
+        : `No safety checks waved through in the last ${span} (recent events window — a full 24h was not covered).`;
+}
+
 export function formatUsd4(value) {
     // A REAL zero is a fact and prints as $0.0000; only an ABSENT/unparseable
     // amount renders as nothing (C2 null policy — the `> 0` test used to hide a
