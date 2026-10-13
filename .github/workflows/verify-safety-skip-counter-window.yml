@@ -1,0 +1,49 @@
+name: verify-safety-skip-counter-window
+
+on:
+  push:
+    branches: [verify/safety-skip-counter-window]
+  workflow_dispatch:
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Focused test (new behaviour)
+        working-directory: web
+        run: node --test tests/safety_skip_counter_label.test.js
+      - name: Full web test lane
+        working-directory: web
+        run: npm test
+      - name: ESLint (no-undef, max-warnings=0)
+        working-directory: web
+        run: npm run lint:undef
+      - name: Node syntax check
+        working-directory: web
+        run: npm run lint
+
+  baseline:
+    # Same full web lane on unmodified upstream ouroboros: distinguishes a
+    # regression this change introduces from a pre-existing failure.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: razzant/ouroboros
+          ref: ouroboros
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Full web test lane on upstream baseline
+        working-directory: web
+        run: npm test
